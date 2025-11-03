@@ -1,7 +1,7 @@
 OpenRank
 ========
 
-Minimal script for retrieving the weighted cumulative GPA from PowerSchool Home Access.
+Minimal script for retrieving the latest transcript details and weighted cumulative GPA from PowerSchool Home Access.
 
 Requirements
 ------------
@@ -17,7 +17,7 @@ Usage
 -----
 1. Run `python fetch.py`.
 2. Enter your Home Access Center username and password when prompted.
-3. The script prints the weighted cumulative GPA if login succeeds.
+3. The script prints the latest transcript year, grade, school, and weighted cumulative GPA if login succeeds.
 
 Notes
 -----

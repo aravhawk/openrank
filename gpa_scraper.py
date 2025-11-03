@@ -2,10 +2,11 @@
 PowerSchool HomeAccess GPA Scraper
 """
 
+import os
 import requests
 from bs4 import BeautifulSoup
 import re
-from typing import Optional
+from typing import Optional, Dict, Any
 
 
 class PowerSchoolGPAScraper:
@@ -19,6 +20,7 @@ class PowerSchoolGPAScraper:
         self.base_url = "https://hac23.esp.k12.ar.us"
         self.login_url = f"{self.base_url}/HomeAccess/Account/LogOn?ReturnUrl=%2fhomeaccess"
         self.login_page_html = None
+        self.debug_transcript_path = os.getenv("HAC_DEBUG_TRANSCRIPT")
         
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -167,30 +169,28 @@ class PowerSchoolGPAScraper:
         except Exception:
             return None
     
-    def extract_gpa(self, html: str) -> Optional[float]:
-        """Extract Weighted Cumulative GPA from transcript HTML"""
+    def _extract_weighted_cumulative_gpa(self, soup: BeautifulSoup) -> Optional[float]:
+        """Extract Weighted Cumulative GPA from parsed transcript HTML"""
         try:
-            soup = BeautifulSoup(html, 'html.parser')
-            
             patterns = [
                 r'Weighted\s+Cumulative\s+GPA[:\s]*([\d.]+)',
                 r'Cumulative\s+Weighted\s+GPA[:\s]*([\d.]+)',
                 r'Weighted\s+GPA[:\s]*([\d.]+)',
             ]
-            
+
             text_content = soup.get_text()
-            
+
             for pattern in patterns:
                 match = re.search(pattern, text_content, re.IGNORECASE)
                 if match:
                     return float(match.group(1))
-            
+
             tables = soup.find_all('table')
             for table in tables:
                 for row in table.find_all('tr'):
                     cells = row.find_all(['td', 'th'])
                     cell_text = ' '.join([cell.get_text(strip=True) for cell in cells])
-                    
+
                     if re.search(r'weighted.*cumulative.*gpa', cell_text, re.IGNORECASE):
                         for cell in cells:
                             cell_value = cell.get_text(strip=True)
@@ -198,9 +198,105 @@ class PowerSchoolGPAScraper:
                                 gpa_value = float(cell_value)
                                 if 0.0 <= gpa_value <= 5.0:
                                     return gpa_value
-            
+
             return None
-            
+
+        except Exception:
+            return None
+
+    def _parse_year_start(self, year_str: str) -> Optional[int]:
+        match = re.match(r'(\d{4})', year_str)
+        if match:
+            try:
+                return int(match.group(1))
+            except ValueError:
+                return None
+        return None
+
+    def _extract_latest_transcript_section(self, soup: BeautifulSoup) -> Optional[Dict[str, str]]:
+        """Extract the most recent transcript summary using text segmentation."""
+        text = soup.get_text(' ', strip=True)
+        # Normalize whitespace to simplify regex matching
+        text = re.sub(r'\s+', ' ', text)
+
+        year_pattern = re.compile(r'Year:\s*([0-9]{4}-[0-9]{2})', re.IGNORECASE)
+        grade_pattern = re.compile(r'Grade:\s*([0-9A-Za-z]+)', re.IGNORECASE)
+        building_pattern = re.compile(
+            r'Building:\s*(.*?)(?=Year:|Grade:|Course\s+Description|Sem1|Sem2|Credit|Total\s+Credit|Weighted|Unweighted|$)',
+            re.IGNORECASE
+        )
+
+        matches = list(year_pattern.finditer(text))
+        if not matches:
+            return None
+
+        sections = []
+        for index, match in enumerate(matches):
+            start = match.start()
+            end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+            block = text[start:end]
+
+            section: Dict[str, str] = {'year': match.group(1)}
+
+            grade_match = grade_pattern.search(block)
+            if grade_match:
+                section['grade'] = grade_match.group(1)
+
+            building_match = building_pattern.search(block)
+            if building_match:
+                school_raw = building_match.group(1).strip()
+                school_clean = re.split(r'(?:Course\s+Description|Sem1|Sem2|Credit|Total\s+Credit)', school_raw, flags=re.IGNORECASE)[0].strip(' -,:;')
+                section['school'] = school_clean
+
+            sections.append(section)
+
+        latest_section: Optional[Dict[str, str]] = None
+        latest_year_start: Optional[int] = None
+
+        for section in sections:
+            year_str = section.get('year')
+            if not year_str:
+                continue
+            start_year = self._parse_year_start(year_str)
+            if start_year is None:
+                continue
+
+            if latest_year_start is None or start_year > latest_year_start:
+                latest_year_start = start_year
+                latest_section = section
+
+        return latest_section
+
+    def extract_transcript_info(self, html: str) -> Optional[Dict[str, Any]]:
+        """Extract transcript summary details including latest year, school, and GPA."""
+        try:
+            soup = BeautifulSoup(html, 'html.parser')
+
+            info: Dict[str, Any] = {}
+
+            gpa = self._extract_weighted_cumulative_gpa(soup)
+            if gpa is not None:
+                info['weighted_cumulative_gpa'] = gpa
+
+            latest_section = self._extract_latest_transcript_section(soup)
+            if latest_section:
+                if latest_section.get('year'):
+                    info['latest_transcript_year'] = latest_section['year']
+                if latest_section.get('school'):
+                    info['latest_transcript_school'] = latest_section['school']
+                if latest_section.get('grade'):
+                    info['latest_transcript_grade'] = latest_section['grade']
+
+            return info or None
+
+        except Exception:
+            return None
+
+    def extract_gpa(self, html: str) -> Optional[float]:
+        """Extract only the Weighted Cumulative GPA from transcript HTML."""
+        try:
+            soup = BeautifulSoup(html, 'html.parser')
+            return self._extract_weighted_cumulative_gpa(soup)
         except Exception:
             return None
     
@@ -213,8 +309,8 @@ class PowerSchoolGPAScraper:
         else:
             return f"{self.base_url}/{url}"
     
-    def get_gpa(self) -> Optional[float]:
-        """Main method that orchestrates all steps to get GPA"""
+    def get_transcript_info(self) -> Optional[Dict[str, Any]]:
+        """Main method that orchestrates all steps to collect transcript summary info."""
         try:
             self.select_district()
             
@@ -225,7 +321,30 @@ class PowerSchoolGPAScraper:
             if not transcript_html:
                 return None
             
-            return self.extract_gpa(transcript_html)
+            if self.debug_transcript_path:
+                try:
+                    with open(self.debug_transcript_path, 'w', encoding='utf-8') as debug_file:
+                        debug_file.write(transcript_html)
+                except Exception:
+                    pass
+
+            info = self.extract_transcript_info(transcript_html)
+
+            if info is None:
+                # Fall back to GPA-only extraction if the richer parser fails
+                gpa_only = self.extract_gpa(transcript_html)
+                if gpa_only is not None:
+                    info = {'weighted_cumulative_gpa': gpa_only}
+
+            return info
             
         except Exception:
             return None
+
+    def get_gpa(self) -> Optional[float]:
+        """Backward-compatible helper that returns only the weighted GPA."""
+        transcript_info = self.get_transcript_info()
+        if not transcript_info:
+            return None
+        gpa = transcript_info.get('weighted_cumulative_gpa')
+        return gpa if isinstance(gpa, (int, float)) else None
