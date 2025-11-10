@@ -25,11 +25,14 @@ def main():
             print(f"Weighted Cumulative GPA: {gpa_only}")
         return
 
+    student_name = transcript_info.get('student_name')
     latest_year = transcript_info.get('latest_transcript_year')
     latest_school = transcript_info.get('latest_transcript_school')
     latest_grade = transcript_info.get('latest_transcript_grade')
     gpa = transcript_info.get('weighted_cumulative_gpa')
 
+    if student_name:
+        print(f"Student Name: {student_name}")
     if latest_year:
         print(f"Latest Transcript Year: {latest_year}")
     if latest_grade:

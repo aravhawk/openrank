@@ -2,7 +2,6 @@
 PowerSchool HomeAccess GPA Scraper
 """
 
-import os
 import requests
 from bs4 import BeautifulSoup
 import re
@@ -20,7 +19,6 @@ class PowerSchoolGPAScraper:
         self.base_url = "https://hac23.esp.k12.ar.us"
         self.login_url = f"{self.base_url}/HomeAccess/Account/LogOn?ReturnUrl=%2fhomeaccess"
         self.login_page_html = None
-        self.debug_transcript_path = os.getenv("HAC_DEBUG_TRANSCRIPT")
         
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -142,14 +140,25 @@ class PowerSchoolGPAScraper:
         except Exception:
             return False
     
-    def navigate_to_transcript(self) -> Optional[str]:
-        """Navigate to the transcript page"""
+    def _fetch_dashboard_html(self) -> Optional[str]:
+        """Retrieve the dashboard page HTML after login."""
         try:
             dashboard_url = f"{self.base_url}/HomeAccess"
             response = self.session.get(dashboard_url, allow_redirects=True)
             response.raise_for_status()
+            return response.text
+        except Exception:
+            return None
+
+    def navigate_to_transcript(self, dashboard_html: Optional[str] = None) -> Optional[str]:
+        """Navigate to the transcript page using optional cached dashboard HTML."""
+        try:
+            if dashboard_html is None:
+                dashboard_html = self._fetch_dashboard_html()
+            if not dashboard_html:
+                return None
             
-            soup = BeautifulSoup(response.text, 'html.parser')
+            soup = BeautifulSoup(dashboard_html, 'html.parser')
             transcript_link = None
             
             for link in soup.find_all('a', href=True):
@@ -267,12 +276,82 @@ class PowerSchoolGPAScraper:
 
         return latest_section
 
-    def extract_transcript_info(self, html: str) -> Optional[Dict[str, Any]]:
-        """Extract transcript summary details including latest year, school, and GPA."""
+    def _is_valid_student_name(self, name: str) -> bool:
+        if not name:
+            return False
+        parts = [part.strip() for part in name.split() if part.strip()]
+        if len(parts) < 2 or len(parts) > 5:
+            return False
+        banned_tokens = {'total', 'credit', 'weighted', 'unweighted', 'gpa', 'grade', 'school'}
+        for part in parts:
+            normalized = part.lower().strip(".,'-")
+            if normalized in banned_tokens:
+                return False
+            if not re.match(r"^[A-Za-z][A-Za-z.'-]*$", part):
+                return False
+        return True
+
+    def _extract_student_name(self, soup: BeautifulSoup) -> Optional[str]:
+        """Extract student name using the dashboard header identity menu."""
+        try:
+            identity_span = soup.select_one('.sg-banner-menu-element.sg-menu-element-identity span')
+            if identity_span:
+                candidate = identity_span.get_text(strip=True)
+                if self._is_valid_student_name(candidate):
+                    return candidate
+
+            banner_container = soup.find('div', attrs={'data-student-id': True})
+            if banner_container:
+                for span in banner_container.find_all('span'):
+                    candidate = span.get_text(strip=True)
+                    if self._is_valid_student_name(candidate):
+                        return candidate
+
+            logout_link = soup.find('a', string=re.compile(r'logout', re.I))
+            if logout_link:
+                identity_li = logout_link.find_previous('li', class_=re.compile(r'sg-menu-element-identity', re.I))
+                if identity_li:
+                    span = identity_li.find('span')
+                    if span:
+                        candidate = span.get_text(strip=True)
+                        if self._is_valid_student_name(candidate):
+                            return candidate
+
+                parent_menu = logout_link.find_parent('ul')
+                if parent_menu:
+                    for li in parent_menu.find_all('li', recursive=False):
+                        classes = ' '.join(li.get('class', []))
+                        if re.search(r'identity', classes, re.I):
+                            span = li.find('span')
+                            if span:
+                                candidate = span.get_text(strip=True)
+                                if self._is_valid_student_name(candidate):
+                                    return candidate
+
+            return None
+        except Exception:
+            return None
+
+    def extract_transcript_info(
+        self,
+        html: str,
+        dashboard_soup: Optional[BeautifulSoup] = None,
+        student_name: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Extract transcript summary details including student name, latest year, school, and GPA."""
         try:
             soup = BeautifulSoup(html, 'html.parser')
 
             info: Dict[str, Any] = {}
+
+            resolved_name = student_name
+            if resolved_name is None and dashboard_soup is not None:
+                resolved_name = self._extract_student_name(dashboard_soup)
+            if resolved_name is None:
+                resolved_name = self._extract_student_name(soup)
+
+            if resolved_name:
+                info['student_name'] = resolved_name
 
             gpa = self._extract_weighted_cumulative_gpa(soup)
             if gpa is not None:
@@ -310,31 +389,30 @@ class PowerSchoolGPAScraper:
             return f"{self.base_url}/{url}"
     
     def get_transcript_info(self) -> Optional[Dict[str, Any]]:
-        """Main method that orchestrates all steps to collect transcript summary info."""
+        """Main method that orchestrates all steps to collect transcript summary info including student name."""
         try:
             self.select_district()
             
             if not self.login():
                 return None
+
+            dashboard_html = self._fetch_dashboard_html()
+            dashboard_soup = BeautifulSoup(dashboard_html, 'html.parser') if dashboard_html else None
+            student_name = self._extract_student_name(dashboard_soup) if dashboard_soup else None
             
-            transcript_html = self.navigate_to_transcript()
+            transcript_html = self.navigate_to_transcript(dashboard_html)
             if not transcript_html:
                 return None
             
-            if self.debug_transcript_path:
-                try:
-                    with open(self.debug_transcript_path, 'w', encoding='utf-8') as debug_file:
-                        debug_file.write(transcript_html)
-                except Exception:
-                    pass
-
-            info = self.extract_transcript_info(transcript_html)
+            info = self.extract_transcript_info(transcript_html, dashboard_soup, student_name)
 
             if info is None:
                 # Fall back to GPA-only extraction if the richer parser fails
                 gpa_only = self.extract_gpa(transcript_html)
                 if gpa_only is not None:
                     info = {'weighted_cumulative_gpa': gpa_only}
+                    if student_name:
+                        info['student_name'] = student_name
 
             return info
             
