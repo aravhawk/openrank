@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}OpenRank Leaderboard{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="app-header">
+        <div class="brand">
+          <span class="logo">⬡</span>
+          <span class="name">OpenRank</span>
+        </div>
+        <nav class="nav-links">
+          {% if session.get('username') %}
+          <a href="{{ url_for('leaderboard') }}" class="nav-link">Leaderboard</a>
+          <form method="post" action="{{ url_for('logout') }}" class="nav-inline-form">
+            <button type="submit" class="pill pill-secondary">Log out</button>
+          </form>
+          {% else %}
+          <a href="{{ url_for('login') }}" class="pill pill-primary">Sign in</a>
+          {% endif %}
+        </nav>
+      </header>
+      <main class="app-main">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        <div class="flash-container">
+          {% for category, message in messages %}
+          <div class="flash flash-{{ category }}">{{ message }}</div>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% endwith %}
+        {% block content %}{% endblock %}
+      </main>
+      <footer class="app-footer">
+        <span>&copy; {{ now.year }} OpenRank · Crafted for GPA excellence</span>
+      </footer>
+    </div>
+  </body>
+</html>

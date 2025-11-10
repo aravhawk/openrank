@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Leaderboard · OpenRank{% endblock %}
+{% block content %}
+<section class="panel">
+  <div class="panel-body">
+    <div class="panel-header">
+      <div>
+        <h1 class="panel-title">Live Leaderboard</h1>
+        <p class="panel-subtitle">Updated whenever a student signs in or an administrator refreshes the roster.</p>
+      </div>
+      {% if role == "admin" %}
+      <form method="post" action="{{ url_for('admin_refresh') }}">
+        <button type="submit" class="pill pill-accent">Refresh everyone</button>
+      </form>
+      {% endif %}
+    </div>
+    {% if students %}
+    <div class="leaderboard">
+      <div class="leaderboard-header">
+        <span>#</span>
+        <span>Name</span>
+        <span class="metric">Weighted GPA</span>
+        <span class="meta">Last updated</span>
+      </div>
+      {% for student in students %}
+      <div
+        class="leaderboard-row {% if loop.index == 1 %}rank-gold{% elif loop.index == 2 %}rank-silver{% endif %} {% if current_user == student.username %}is-current{% endif %}"
+      >
+        <span class="rank">{{ loop.index }}</span>
+        <div class="identity">
+          <span class="name">{{ student.name or student.username }}</span>
+          <span class="muted">{{ student.district }}</span>
+        </div>
+        <span class="metric">{{ '%.3f'|format(student.gpa) if student.gpa is not none else '—' }}</span>
+        <span class="meta">{{ student.last_updated|humandate }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <h2>No students yet</h2>
+      <p>As soon as someone signs in, they will appear here with their latest GPA.</p>
+      <a href="{{ url_for('login') }}" class="pill pill-primary">Add the first student</a>
+    </div>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

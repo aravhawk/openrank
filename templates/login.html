@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Sign in · OpenRank{% endblock %}
+{% block content %}
+<section class="panel panel-centered">
+  <div class="panel-body">
+    <h1 class="panel-title">Welcome to OpenRank</h1>
+    <p class="panel-subtitle">
+      Track student performance in real time. Sign in with your Home Access credentials to update your GPA and climb the
+      leaderboard.
+    </p>
+    <form method="post" class="form-grid">
+      <label class="field">
+        <span class="field-label">Username</span>
+        <input
+          type="text"
+          name="username"
+          placeholder="student.id"
+          value="{{ request.form.get('username', '') }}"
+          required
+          autofocus
+          class="input"
+        />
+      </label>
+      <label class="field">
+        <span class="field-label">Password</span>
+        <input type="password" name="password" placeholder="Enter your password" required class="input" />
+      </label>
+      <label class="field">
+        <span class="field-label">District</span>
+        <input type="text" name="district" value="{{ request.form.get('district', district) }}" class="input" />
+      </label>
+      <label class="field">
+        <span class="field-label">Display name (optional)</span>
+        <input
+          type="text"
+          name="display_name"
+          placeholder="How should we show your name?"
+          value="{{ request.form.get('display_name', '') }}"
+          class="input"
+        />
+      </label>
+      <button type="submit" class="pill pill-primary pill-cta">Refresh GPA &amp; Enter</button>
+    </form>
+    <div class="login-hint">
+      <p>
+        Admins can sign in with the default credentials stored in <code>data/students.json</code>. Students are stored on
+        first login and refreshed automatically every time they sign in.
+      </p>
+    </div>
+  </div>
+</section>
+{% endblock %}
